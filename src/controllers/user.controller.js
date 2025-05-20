@@ -4,7 +4,6 @@ import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
-import { use } from "react";
 
 
 const generateAccessAndRefreshTokens = async (userId) => {
@@ -306,13 +305,34 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Avatar file is missing");
     }
 
+    // Fetch the current user to get the old avatar URL
+    const user = await User.findById(req.user._id);
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+    const oldAvatarUrl = user.avatar // Get the URL of the current avatar
+
     const avatar = await uploadOnCloudinary(avatarLocalPath);
 
     if (!avatar.url) {
-        throw new ApiError(400, "Error uploading avatar");
+        throw new ApiError(400, "Error uploading new avatar to Cloudinary");
     }
 
-    const user = await User.findByIdAndUpdate(
+    // Extract public ID from old avatar URL and delete from Cloudinary
+    if (oldAvatarUrl) {
+        try {
+            const oldAvatarPublicId = oldAvatarUrl.split("/").pop().split(".")[0];
+            await uploadOnCloudinary.destroy(oldAvatarPublicId);
+            console.log(`Old avatar ${oldAvatarPublicId} deleted from Cloudinary successfully`);
+        } catch (error) {
+            console.error("Failed to deleting old avatar from Cloudinary:", error);
+            throw new ApiError(500, "Error deleting old avatar from Cloudinary");
+            // Log the error but don't necessarily throw, as the main operation (updating new avatar) is successful
+        }
+    }
+    
+    // Update user with new avatar URL
+    const updatedUser = await User.findByIdAndUpdate(
         req.user._id,
         {
             $set: {
@@ -323,6 +343,10 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
             new: true,
         }
     ).select("-password");
+
+    if (!updatedUser) { // Safeguard
+        throw new ApiError(500, "User not found after avatar update attempt");
+    }
 
     return res
         .status(200)
@@ -337,13 +361,38 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
         throw new ApiError(400, "CoverImage file is missing");
     }
 
+     // Fetch the current user to get the old coverImage URL
+    const user = await User.findById(req.user._id);
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+    const oldCoverImageUrl = user.coverImage // Get the URL of the current coverImage
+    
+
+    if (!coverImage.url) {
+        throw new ApiError(400, "Error uploading new coverImage to Cloudinary");
+    }
+
+    // Extract public ID from old coverImage URL and delete from Cloudinary
+    if (oldCoverImageUrl) {
+        try {
+            const oldCoverImagePublicId = oldCoverImageUrl.split("/").pop().split(".")[0];
+            await uploadOnCloudinary.destroy(oldCoverImagePublicId);
+            console.log(`Old coverImage ${oldCoverImagePublicId} deleted from Cloudinary successfully`);
+        } catch (error) {
+            console.error("Failed to deleting old coverImage from Cloudinary:", error);
+            throw new ApiError(500, "Error deleting old coverImage from Cloudinary");
+            // Log the error but don't necessarily throw, as the main operation (updating new avatar) is successful
+        }
+    }
+
     const coverImage = await uploadOnCloudinary(coverImageLocalPath);
 
     if (!coverImage.url) {
         throw new ApiError(400, "Error uploading coverImage");
     }
 
-    const user = await User.findByIdAndUpdate(
+    const updatedUser = await User.findByIdAndUpdate(
         req.user._id,
         {
             $set: {
@@ -355,13 +404,16 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
         }
     ).select("-password");
 
+    if (!updatedUser) { // Safeguard
+        throw new ApiError(500, "User not found after cover image update attempt");
+    }
+
     return res
         .status(200)
         .json(
             new ApiResponse(200, user, "CoverImage updated successfully")
         );
 });
-
 
 export { 
     registerUser,
